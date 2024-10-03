@@ -33,31 +33,25 @@ class FFEncoder:
         self.__start_time = time()
 
     async def progress(self):
-    self.__total_time = await mediainfo(self.dl_path, get_duration=True)
+        self.__total_time = await mediainfo(self.dl_path, get_duration=True)
+        if isinstance(self.__total_time, str):
+            self.__total_time = 1.0  # Default to 1.0 to avoid division errors
+        while not (self.__proc is None or self.is_cancelled):
+            async with aiopen(self.__prog_file, 'r+') as p:
+                text = await p.read()
+            if text:
+                time_done = floor(int(t[-1]) / 1000000) if (t := findall("out_time_ms=(\d+)", text)) else 1
+                ensize = int(s[-1]) if (s := findall(r"total_size=(\d+)", text)) else 0
+                
+                diff = time() - self.__start_time
+                speed = ensize / diff if diff > 0 else 0  # Avoid division by zero
+                percent = round((time_done / self.__total_time) * 100, 2)
+                tsize = ensize / (max(percent, 0.01) / 100)  # Ensure we don't divide by zero
+                eta = (tsize - ensize) / max(speed, 0.01)  # Ensure we don't divide by zero
     
-    if isinstance(self.__total_time, str):
-        self.__total_time = 1.0  # Ensure it's a float
-
-    if self.__total_time <= 0:  # In case of invalid total time
-        LOGS.error(f"Invalid total time detected for {self.__name}: {self.__total_time}")
-        return  # Optionally handle the error further
-
-    while not (self.__proc is None or self.is_cancelled):
-        async with aiopen(self.__prog_file, 'r+') as p:
-            text = await p.read()
-        if text:
-            time_done = floor(int(t[-1]) / 1000000) if (t := findall("out_time_ms=(\d+)", text)) else 1
-            ensize = int(s[-1]) if (s := findall(r"total_size=(\d+)", text)) else 0
-            
-            diff = time() - self.__start_time
-            speed = ensize / diff
-            percent = round((time_done / self.__total_time) * 100, 2)
-            tsize = ensize / (max(percent, 0.01) / 100)
-            eta = (tsize - ensize) / max(speed, 0.01)
-
-            bar = floor(percent / 8) * "■" + (12 - floor(percent / 8)) * "□"
-            
-            progress_str = f"""➤ <b>Anime Name :</b> <b><i>{self.__name}</i></b>
+                bar = floor(percent / 8) * "■" + (12 - floor(percent / 8)) * "□"
+                
+                progress_str = f"""➤ <b>Anime Name :</b> <b><i>{self.__name}</i></b>
 ● <b>Status :</b> <i>Encoding..</i>
     [{bar}] {percent}%
     
@@ -67,18 +61,17 @@ class FFEncoder:
    ● <b>Time Left :</b> {convertTime(eta)}</blockquote>
 ● <b>File(s) Encoded:</b> <code>{Var.QUALS.index(self.__qual)} / {len(Var.QUALS)}</code>"""
             
-            await editMessage(self.message, progress_str)
-            if (prog := findall(r"progress=(\w+)", text)) and prog[-1] == 'end':
-                break
-        await asleep(8)
+                await editMessage(self.message, progress_str)
+                if (prog := findall(r"progress=(\w+)", text)) and prog[-1] == 'end':
+                    break
+            await asleep(8)
     
     async def start_encode(self):
         if ospath.exists(self.__prog_file):
             await aioremove(self.__prog_file)
     
         async with aiopen(self.__prog_file, 'w+'):
-            LOGS.info("Progress Temp Generated !")
-            pass
+            LOGS.info("Progress Temp Generated!")
         
         dl_npath, out_npath = ospath.join("encode", "ffanimeadvin.mkv"), ospath.join("encode", "ffanimeadvout.mkv")
         await aiorename(self.dl_path, dl_npath)
@@ -109,5 +102,6 @@ class FFEncoder:
         if self.__proc is not None:
             try:
                 self.__proc.kill()
-            except:
-                pass
+            except Exception as e:
+                LOGS.error(f"Error while killing process: {e}")
+
