@@ -165,13 +165,20 @@ async def mediainfo(file, get_json=False, get_duration=False):
         outformat = "HTML"
         if get_duration or get_json:
             outformat = "JSON"
-        process = await create_subprocess_shell(f"mediainfo '''{file}''' --Output={outformat}", stdout=PIPE, stderr=PIPE)
+        process = await create_subprocess_shell(f"mediainfo '{file}' --Output={outformat}", stdout=PIPE, stderr=PIPE)
         stdout, _ = await process.communicate()
+        
         if get_duration:
             try:
-                return float(jloads(stdout.decode())['media']['track'][0]['Duration'])
-            except Exception:
-                return 1440 # 24min
+                duration = float(jloads(stdout.decode())['media']['track'][0]['Duration'])
+                if duration <= 0:
+                    LOGS.error(f"Invalid duration for file {file}: {duration}")
+                    return 1440  # Default to 24 minutes if the duration is invalid
+                return duration
+            except Exception as e:
+                LOGS.error(f"Error parsing duration for file {file}: {e}")
+                return 1440  # Default to 24 minutes on error
+
         return await get_telegraph(stdout.decode())
     except Exception as err:
         await rep.report(format_exc(), "error")
