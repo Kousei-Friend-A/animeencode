@@ -34,8 +34,12 @@ class FFEncoder:
 
     async def progress(self):
         self.__total_time = await mediainfo(self.dl_path, get_duration=True)
-        if isinstance(self.__total_time, str):
-            self.__total_time = 1.0  # Default to 1.0 to avoid division errors
+        
+        # Ensure valid total time (fallback in case of invalid duration)
+        if not isinstance(self.__total_time, (int, float)) or self.__total_time <= 0:
+            await rep.report(f"Invalid total time detected for {self.__name}.", "error")
+            self.__total_time = 1.0  # Fallback to avoid crashes during encoding
+        
         while not (self.__proc is None or self.is_cancelled):
             async with aiopen(self.__prog_file, 'r+') as p:
                 text = await p.read()
@@ -48,7 +52,8 @@ class FFEncoder:
                 percent = round((time_done / self.__total_time) * 100, 2)
                 tsize = ensize / (max(percent, 0.01) / 100)  # Ensure we don't divide by zero
                 eta = (tsize - ensize) / max(speed, 0.01)  # Ensure we don't divide by zero
-    
+
+                # Progress bar for visual representation
                 bar = floor(percent / 8) * "■" + (12 - floor(percent / 8)) * "□"
                 
                 progress_str = f"""➤ <b>Anime Name :</b> <b><i>{self.__name}</i></b>
@@ -104,4 +109,3 @@ class FFEncoder:
                 self.__proc.kill()
             except Exception as e:
                 LOGS.error(f"Error while killing process: {e}")
-
