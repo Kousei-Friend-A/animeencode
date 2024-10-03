@@ -1,13 +1,5 @@
 from asyncio import gather, create_task, sleep as asleep, Event
-from asyncio.subprocess import PIPE
-from os import path as ospath, system
-from aiofiles import open as aiopen
-from aiofiles.os import remove as aioremove
-from traceback import format_exc
-from base64 import urlsafe_b64encode
-from time import time
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-
+from os import path as ospath
 from bot import bot, bot_loop, Var, ani_cache, ffQueue, ffLock, ff_queued
 from .tordownload import TorDownloader
 from .database import db
@@ -16,6 +8,7 @@ from .text_utils import TextEditor
 from .ffencoder import FFEncoder
 from .tguploader import TgUploader
 from .reporter import rep
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 btn_formatter = {
     '1080':'1080p', 
@@ -58,7 +51,6 @@ async def get_animes(name, torrent, force=False):
                 photo=await aniInfo.get_poster(),
                 caption=await aniInfo.get_caption()
             )
-            #post_msg = await sendMessage(Var.MAIN_CHANNEL, (await aniInfo.get_caption()).format(await aniInfo.get_poster()), invert_media=True)
             
             await asleep(1.5)
             stat_msg = await sendMessage(Var.MAIN_CHANNEL, f"➤ <b>Anime Name :</b> <b><i>{name}</i></b>\n\n<i>● Downloading...</i>")
@@ -81,55 +73,31 @@ async def get_animes(name, torrent, force=False):
             btns = []
             for qual in Var.QUALS:
                 filename = await aniInfo.get_upname(qual)
-                await editMessage(stat_msg, f"➤ <b>Anime Name :</b> <b><i>{name}</i></b>\n\n<i>● Ready to Encode...</i>")
-                
-                await asleep(1.5)
-                await rep.report("Starting Encode...", "info")
+                await editMessage(stat_msg, f"➤ <b>Anime Name :</b> <b><i>{name}</i></b>\n\n<i>● Encoding... [{btn_formatter[qual]}]</i>")
                 try:
-                    out_path = await FFEncoder(stat_msg, dl, filename, qual).start_encode()
+                    encoder = FFEncoder(stat_msg, dl, filename, qual)
+                    out_path = await encoder.start_encode()
+                    if not out_path:
+                        raise Exception("Encoding did not return a valid output path.")
                 except Exception as e:
-                    await rep.report(f"Error: {e}, Cancelled,  Retry Again !", "error")
+                    await rep.report(f"Encoding Error for {filename} at quality {qual}: {e}", "error")
                     await stat_msg.delete()
                     ffLock.release()
                     return
-                await rep.report("Succesfully Compressed Now Going To Upload...", "info")
+
+                url = await TgUploader().upload(out_path, filename, stat_msg)
+                btns.append([InlineKeyboardButton(f'{btn_formatter[qual]}', url=url)])
+                await aniInfo.update_db(qual, url)
                 
-                await editMessage(stat_msg, f"➤ <b>Anime Name :</b> <b><i>{filename}</i></b>\n\n<i>● Ready to Upload...</i>")
-                await asleep(1.5)
-                try:
-                    msg = await TgUploader(stat_msg).upload(out_path, qual)
-                except Exception as e:
-                    await rep.report(f"Error: {e}, Cancelled,  Retry Again !", "error")
-                    await stat_msg.delete()
-                    ffLock.release()
-                    return
-                await rep.report("Succesfully Uploaded File into Telegram...", "info")
-                
-                msg_id = msg.id
-                link = f"https://telegram.me/{(await bot.get_me()).username}?start={await encode('get-'+str(msg_id * abs(Var.FILE_STORE)))}"
-                
-                if post_msg:
-                    if len(btns) != 0 and len(btns[-1]) == 1:
-                        btns[-1].insert(1, InlineKeyboardButton(f"{btn_formatter[qual]}", url=link))
-                    else:
-                        btns.append([InlineKeyboardButton(f"{btn_formatter[qual]}", url=link)])
-                    await editMessage(post_msg, post_msg.caption.html if post_msg.caption else "", InlineKeyboardMarkup(btns))
-                    
-                await db.saveAnime(ani_id, ep_no, qual, post_id)
-                bot_loop.create_task(extra_utils(msg_id, out_path))
-            ffLock.release()
-            
+            await bot.edit_message_reply_markup(
+                Var.MAIN_CHANNEL,
+                post_id,
+                reply_markup=InlineKeyboardMarkup(btns)
+            )
+            await rep.report("All Done!!", "info")
             await stat_msg.delete()
-            await aioremove(dl)
-        ani_cache['completed'].add(ani_id)
-    except Exception as error:
-        await rep.report(format_exc(), "error")
-
-async def extra_utils(msg_id, out_path):
-    msg = await bot.get_messages(Var.FILE_STORE, message_ids=msg_id)
-
-    if Var.BACKUP_CHANNEL != 0:
-        for chat_id in Var.BACKUP_CHANNEL.split():
-            await msg.copy(int(chat_id))
-            
-    # MediaInfo, ScreenShots, Sample Video ( Add-ons Features )
+            await asleep(3)
+            await TgUploader().clean()
+            ffLock.release()
+    except Exception as e:
+        await rep.report(f"Error in get_animes: {e}", "error")
