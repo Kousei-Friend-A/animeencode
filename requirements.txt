@@ -8,12 +8,11 @@ motor==3.6.0
 feedparser
 psutil
 pycountry
-pyrofork==2.3.45
+pyrofork
 python-dotenv
 tgcrypto
 torrentp==0.1.7
 git+https://github.com/kaif-00z/html-telegraph-poster
 uvloop
-python-dotenv
 lxml_html_clean
 ffmpeg-python
